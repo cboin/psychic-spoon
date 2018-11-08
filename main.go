@@ -26,6 +26,10 @@ func (s *stringChecker) Read(p []byte) (n int, err error) {
 		s.match = true
 	}
 
+	if err == io.EOF && s.match {
+		log.Println("SSH found")
+	}
+
 	return
 }
 
@@ -41,12 +45,7 @@ func main() {
 	proxy.Verbose = *verbose
 
 	proxy.OnResponse().DoFunc(func(r *http.Response, ctx *goproxy.ProxyCtx) *http.Response {
-		sc := newStringChecker("SSH", r.Body)
-		if sc.match {
-			log.Println("SSH found")
-		}
-		r.Body = sc
-
+		r.Body = newStringChecker("SSH", r.Body)
 		return r
 	})
 
