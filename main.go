@@ -4,9 +4,12 @@ import (
 	"bytes"
 	"flag"
 	"github.com/elazarl/goproxy"
+	"github.com/elazarl/goproxy/regretable"
 	"io"
 	"log"
 	"net/http"
+	"strconv"
+	"strings"
 )
 
 type stringChecker struct {
@@ -42,6 +45,39 @@ func main() {
 	proxy.OnResponse().DoFunc(func(r *http.Response, ctx *goproxy.ProxyCtx) *http.Response {
 		sc := newStringChecker("SSH", r.Body)
 		r.Body = sc
+
+		return r
+	})
+
+	/* checks if the detected content type match the content type given
+	   in the http header. */
+	proxy.OnResponse().DoFunc(func(r *http.Response, ctx *goproxy.ProxyCtx) *http.Response {
+		threshold := 16
+		contentLengthText := r.Header.Get("Content-Length")
+
+		contentLength, err := strconv.Atoi(contentLengthText)
+		if err != nil {
+			log.Fatal(err)
+		}
+
+		if contentLength < threshold {
+			return r
+		}
+
+		var b = make([]byte, 16)
+		rb := regretable.NewRegretableReaderCloser(r.Body)
+		rb.Read(b)
+		rb.Regret()
+		r.Body = rb
+
+		/* if the Content-Type contains ";" drop the right part */
+		detectedContentType := strings.Split(http.DetectContentType(b), ";")[0]
+		headerContentType := r.Header.Get("Content-Type")
+
+		if detectedContentType != headerContentType {
+			ctx.Logf("Content-Type  mismatch -> (%s,%s)", detectedContentType,
+				headerContentType)
+		}
 
 		return r
 	})
