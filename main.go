@@ -10,20 +10,19 @@ import (
 )
 
 type stringChecker struct {
-	string string
-	match  bool
-	reader io.ReadCloser
+	pattern string
+	reader  io.ReadCloser
 }
 
 func newStringChecker(s string, r io.ReadCloser) *stringChecker {
-	return &stringChecker{s, false, r}
+	return &stringChecker{s, r}
 }
 
 func (s *stringChecker) Read(p []byte) (n int, err error) {
 	n, err = s.reader.Read(p)
 
-	if bytes.Contains(p[:n], []byte(s.string)) {
-		s.match = true
+	if bytes.Contains(p[:n], []byte(s.pattern)) {
+		log.Println("Pattern -> (", s.pattern, ") found")
 	}
 
 	return
@@ -42,9 +41,6 @@ func main() {
 
 	proxy.OnResponse().DoFunc(func(r *http.Response, ctx *goproxy.ProxyCtx) *http.Response {
 		sc := newStringChecker("SSH", r.Body)
-		if sc.match {
-			log.Println("SSH found")
-		}
 		r.Body = sc
 
 		return r
