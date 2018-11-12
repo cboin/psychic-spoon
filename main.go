@@ -3,13 +3,14 @@ package main
 import (
 	"bytes"
 	"flag"
-	"github.com/elazarl/goproxy"
-	"github.com/elazarl/goproxy/regretable"
 	"io"
 	"log"
 	"net/http"
 	"strconv"
 	"strings"
+
+	"github.com/elazarl/goproxy"
+	"github.com/elazarl/goproxy/regretable"
 )
 
 type stringChecker struct {
@@ -61,6 +62,7 @@ func main() {
 		}
 
 		if contentLength < threshold {
+			log.Println("Body under threshold")
 			return r
 		}
 
@@ -70,7 +72,7 @@ func main() {
 		rb.Regret()
 		r.Body = rb
 
-		/* if the Content-Type contains ";" drop the right part */
+		// if the Content-Type contains ";" drop the right part
 		detectedContentType := strings.Split(http.DetectContentType(b), ";")[0]
 		headerContentType := r.Header.Get("Content-Type")
 
@@ -78,6 +80,24 @@ func main() {
 			ctx.Logf("Content-Type  mismatch -> (%s,%s)", detectedContentType,
 				headerContentType)
 		}
+
+		return r
+	})
+
+	proxy.OnRequest().DoFunc(func(r *http.Request, ctx *goproxy.ProxyCtx) (*http.Request, *http.Response) {
+		ctx.Logf(r.Header.Get("User-agent"))
+
+		return r, nil
+	})
+
+	proxy.OnResponse().DoFunc(func(r *http.Response, ctx *goproxy.ProxyCtx) *http.Response {
+		buf := make([]byte, 1024)
+		rb := regretable.NewRegretableReaderCloser(r.Body)
+		rb.Read(buf)
+		rb.Regret()
+		r.Body = rb
+
+		log.Println(string(buf))
 
 		return r
 	})
