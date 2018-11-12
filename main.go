@@ -44,7 +44,7 @@ func main() {
 	proxy.Verbose = *verbose
 
 	proxy.OnResponse().DoFunc(func(r *http.Response, ctx *goproxy.ProxyCtx) *http.Response {
-		sc := newStringChecker("SSH", r.Body)
+		sc := newStringChecker("SSH-2.0-OpenSSH_", r.Body)
 		r.Body = sc
 
 		return r
