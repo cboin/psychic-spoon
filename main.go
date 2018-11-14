@@ -13,6 +13,7 @@ import (
 
 	"github.com/elazarl/goproxy"
 	"github.com/elazarl/goproxy/regretable"
+	uA "github.com/mssola/user_agent"
 )
 
 var (
@@ -42,52 +43,52 @@ func (s *stringChecker) Close() error {
 	return s.reader.Close()
 }
 
-type sshHandCheckPktSize struct {
-	clientPktSize []int64
-	serverPktSize []int64
+type sshConnectionPackets struct {
+	clientPackets []int64
+	serverPackets []int64
 }
 
-func newSshHandCheckPktSize() *sshHandCheckPktSize {
-	var ps sshHandCheckPktSize
-	ps.clientPktSize = []int64{21, 1392, 48, 16}
-	ps.serverPktSize = []int64{21, 1080, 452}
+func newSshConnectionChecker() *sshConnectionPackets {
+	var ps sshConnectionPackets
+	ps.clientPackets = []int64{21, 1392, 48, 16}
+	ps.serverPackets = []int64{21, 1080, 452}
 
 	return &ps
 }
 
-func (s *sshHandCheckPktSize) hasReceivedPacket(size int64) bool {
-	if len(s.serverPktSize) == 0 {
+func (s *sshConnectionPackets) isSshConnectionResponse(size int64) bool {
+	if len(s.serverPackets) == 0 {
 		return true
 	}
 
-	if s.serverPktSize[0] == size {
-		s.serverPktSize = s.serverPktSize[1:]
+	if s.serverPackets[0] == size {
+		s.serverPackets = s.serverPackets[1:]
 	}
 
 	return false
 }
 
-func (s *sshHandCheckPktSize) hasSendedRequest(size int64) bool {
-	if len(s.clientPktSize) == 0 {
+func (s *sshConnectionPackets) isSshConnectipnRequest(size int64) bool {
+	if len(s.clientPackets) == 0 {
 		return true
 	}
 
-	if s.clientPktSize[0] == size {
-		s.clientPktSize = s.clientPktSize[1:]
+	if s.clientPackets[0] == size {
+		s.clientPackets = s.clientPackets[1:]
 	}
 
 	return false
 }
 
 type session struct {
-	timestamp                       int64
-	sshHandCheck                    *sshHandCheckPktSize
-	hasFoundSshHandCheckInResponses bool
-	hasFoundSshHandCheckInRequests  bool
+	timestamp              int64
+	sshConnection          *sshConnectionPackets
+	sshConnectionResponses bool
+	sshConnectionRequests  bool
 }
 
 func newSession() *session {
-	return &session{time.Now().Unix(), newSshHandCheckPktSize(), false, false}
+	return &session{time.Now().Unix(), newSshConnectionChecker(), false, false}
 }
 
 type sessionMap struct {
@@ -128,8 +129,6 @@ func main() {
 		return r
 	})
 
-	/* checks if the detected content type match the content type given
-	   in the http header. */
 	proxy.OnResponse().DoFunc(func(r *http.Response, ctx *goproxy.ProxyCtx) *http.Response {
 		threshold := 16
 		contentLengthText := r.Header.Get("Content-Length")
@@ -163,9 +162,33 @@ func main() {
 	})
 
 	proxy.OnRequest().DoFunc(func(r *http.Request, ctx *goproxy.ProxyCtx) (*http.Request, *http.Response) {
-		ctx.Logf(r.Header.Get("User-agent"))
+		userAgent := uA.New(r.Header.Get("User-Agent"))
+
+		browser, _ := userAgent.Browser()
+
+		if browser == "" {
+			log.Println("No browser found in user agent")
+			return r, nil
+		}
+
+		userAgents := []string{
+			"Go-http-client/1.1",
+		}
+
+		for _, ua := range userAgents {
+			if strings.Contains(ua, browser) {
+				log.Println("User agent in black list")
+				return r, nil
+			}
+		}
 
 		return r, nil
+	})
+
+	proxy.OnResponse().DoFunc(func(r *http.Response, ctx *goproxy.ProxyCtx) *http.Response {
+		log.Println("Response Content-Length:", r.ContentLength)
+
+		return r
 	})
 
 	proxy.OnResponse().DoFunc(func(r *http.Response, ctx *goproxy.ProxyCtx) *http.Response {
@@ -187,13 +210,13 @@ func main() {
 		session := sessions.Get(key)
 		if session == nil {
 			session = sessions.Put(key, newSession())
-		} else if session.hasFoundSshHandCheckInResponses {
+		} else if session.sshConnectionResponses {
 			return r
 		}
 
-		if session.sshHandCheck.hasReceivedPacket(r.ContentLength) {
+		if session.sshConnection.isSshConnectionResponse(r.ContentLength) {
 			log.Println("SSH handcheck found in responses")
-			session.hasFoundSshHandCheckInResponses = true
+			session.sshConnectionResponses = true
 		}
 
 		return r
@@ -205,13 +228,13 @@ func main() {
 		session := sessions.Get(key)
 		if session == nil {
 			session = sessions.Put(key, newSession())
-		} else if session.hasFoundSshHandCheckInRequests {
+		} else if session.sshConnectionRequests {
 			return r, nil
 		}
 
-		if session.sshHandCheck.hasSendedRequest(r.ContentLength) {
+		if session.sshConnection.isSshConnectipnRequest(r.ContentLength) {
 			log.Println("SSH handcheck found in requests")
-			session.hasFoundSshHandCheckInRequests = true
+			session.sshConnectionRequests = true
 		}
 
 		return r, nil
