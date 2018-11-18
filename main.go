@@ -5,6 +5,7 @@ import (
 	"flag"
 	"io"
 	"log"
+	"net"
 	"net/http"
 	"strconv"
 	"strings"
@@ -85,10 +86,17 @@ type session struct {
 	sshConnection          *sshConnectionPackets
 	sshConnectionResponses bool
 	sshConnectionRequests  bool
+	httpGets               int64
+	httpPosts              int64
+	httpConnects           int64
 }
 
 func newSession() *session {
-	return &session{time.Now().Unix(), newSshConnectionChecker(), false, false}
+	return &session{
+		timestamp:     time.Now().Unix(),
+		sshConnection: newSshConnectionChecker(),
+	}
+
 }
 
 type sessionMap struct {
@@ -115,6 +123,18 @@ func (sm *sessionMap) Put(key string, s *session) *session {
 	return sm.sessions[key]
 }
 
+func getSession(host string, remoteAddr string) *session {
+	log.Println("getSession(host:", host, ",", remoteAddr, ")")
+	key := "Request|" + host + "|" + remoteAddr
+
+	session := sessions.Get(key)
+	if session == nil {
+		session = sessions.Put(key, newSession())
+	}
+
+	return session
+}
+
 func main() {
 	verbose := flag.Bool("v", true, "should every proxy request be logged to stdout")
 	addr := flag.String("addr", ":3128", "proxy listen address")
@@ -123,7 +143,7 @@ func main() {
 	proxy.Verbose = *verbose
 
 	proxy.OnResponse().DoFunc(func(r *http.Response, ctx *goproxy.ProxyCtx) *http.Response {
-		sc := newStringChecker("SSH-2.0-OpenSSH_", r.Body)
+		sc := newStringChecker("SSH-_", r.Body)
 		r.Body = sc
 
 		return r
@@ -205,17 +225,14 @@ func main() {
 
 	// Look for ssh handcheck
 	proxy.OnResponse().DoFunc(func(r *http.Response, ctx *goproxy.ProxyCtx) *http.Response {
-		key := "Response|" + r.Request.Host + "|" + r.Request.RemoteAddr
-
-		session := sessions.Get(key)
-		if session == nil {
-			session = sessions.Put(key, newSession())
-		} else if session.sshConnectionResponses {
-			return r
+		ip, _, err := net.SplitHostPort(r.Request.RemoteAddr)
+		if err != nil {
+			log.Panic(err)
 		}
+		session := getSession(r.Request.Host, ip)
 
 		if session.sshConnection.isSshConnectionResponse(r.ContentLength) {
-			log.Println("SSH handcheck found in responses")
+			log.Println("Diffel-man exchange in responses")
 			session.sshConnectionResponses = true
 		}
 
@@ -223,22 +240,51 @@ func main() {
 	})
 
 	proxy.OnRequest().DoFunc(func(r *http.Request, ctx *goproxy.ProxyCtx) (*http.Request, *http.Response) {
-		key := "Request|" + r.Host + "|" + r.RemoteAddr
-
-		session := sessions.Get(key)
-		if session == nil {
-			session = sessions.Put(key, newSession())
-		} else if session.sshConnectionRequests {
-			return r, nil
+		ip, _, err := net.SplitHostPort(r.RemoteAddr)
+		if err != nil {
+			log.Panic(err)
 		}
+		session := getSession(r.Host, ip)
 
 		if session.sshConnection.isSshConnectipnRequest(r.ContentLength) {
-			log.Println("SSH handcheck found in requests")
+			log.Println("Diffel-man exchange in requests")
 			session.sshConnectionRequests = true
 		}
 
 		return r, nil
 	})
 
+	// Count number of GET and POST
+	proxy.OnRequest().DoFunc(func(r *http.Request, ctx *goproxy.ProxyCtx) (*http.Request, *http.Response) {
+		ip, _, err := net.SplitHostPort(r.RemoteAddr)
+		if err != nil {
+			log.Panic(err)
+		}
+		session := getSession(r.Host, ip)
+
+		switch r.Method {
+		case "GET":
+			session.httpGets += 1
+		case "POST":
+			session.httpPosts += 1
+		case "CONNECT":
+			session.httpConnects += 1
+		}
+
+		log.Println("HTTP GETS:", session.httpGets, "HTTP POSTS:",
+			session.httpPosts, "timestamp:", session.timestamp)
+
+		if session.httpPosts > (session.httpGets + 10) {
+			log.Println("Suspiscious POST requests")
+		}
+
+		if session.httpConnects > 0 {
+			log.Println("Suspiscious CONNECT requests")
+		}
+
+		return r, nil
+	})
+
 	log.Fatal(http.ListenAndServe(*addr, proxy))
+
 }
