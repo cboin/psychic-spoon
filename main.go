@@ -89,6 +89,7 @@ type session struct {
 	httpGets               int64
 	httpPosts              int64
 	httpConnects           int64
+	lsshConns              int64
 }
 
 func newSession() *session {
@@ -153,9 +154,14 @@ func main() {
 		threshold := 16
 		contentLengthText := r.Header.Get("Content-Length")
 
+		if contentLengthText == "" {
+			log.Println("Content-Length: nil")
+			return r
+		}
+
 		contentLength, err := strconv.Atoi(contentLengthText)
 		if err != nil {
-			log.Fatal(err)
+			log.Panic(err)
 		}
 
 		if contentLength < threshold {
@@ -203,24 +209,6 @@ func main() {
 		}
 
 		return r, nil
-	})
-
-	proxy.OnResponse().DoFunc(func(r *http.Response, ctx *goproxy.ProxyCtx) *http.Response {
-		log.Println("Response Content-Length:", r.ContentLength)
-
-		return r
-	})
-
-	proxy.OnResponse().DoFunc(func(r *http.Response, ctx *goproxy.ProxyCtx) *http.Response {
-		buf := make([]byte, 1024)
-		rb := regretable.NewRegretableReaderCloser(r.Body)
-		rb.Read(buf)
-		rb.Regret()
-		r.Body = rb
-
-		log.Println(string(buf))
-
-		return r
 	})
 
 	// Look for ssh handcheck
@@ -280,6 +268,54 @@ func main() {
 
 		if session.httpConnects > 0 {
 			log.Println("Suspiscious CONNECT requests")
+		}
+
+		return r, nil
+	})
+
+	proxy.OnResponse().DoFunc(func(r *http.Response, ctx *goproxy.ProxyCtx) *http.Response {
+		ip, _, err := net.SplitHostPort(r.Request.RemoteAddr)
+		if err != nil {
+			log.Panic(err)
+		}
+		session := getSession(r.Request.Host, ip)
+
+		contentLength := r.ContentLength
+
+		if contentLength == 36 || contentLength == 76 {
+			if session.lsshConns == 0 {
+				session.lsshConns += 1
+			}
+
+			if session.lsshConns >= 2 {
+				session.lsshConns += 1
+			}
+		}
+
+		if (contentLength > 36 || contentLength > 76) && session.lsshConns >= 10 {
+			log.Println("SSH TTY Keystrokes detected")
+		}
+
+		return r
+	})
+
+	proxy.OnRequest().DoFunc(func(r *http.Request, ctx *goproxy.ProxyCtx) (*http.Request, *http.Response) {
+		ip, _, err := net.SplitHostPort(r.RemoteAddr)
+		if err != nil {
+			log.Panic(err)
+		}
+		session := getSession(r.Host, ip)
+
+		contentLength := r.ContentLength
+
+		if contentLength == 36 || contentLength == 76 {
+			if session.lsshConns == 1 {
+				session.lsshConns += 1
+			}
+
+			if session.lsshConns >= 3 {
+				session.lsshConns += 1
+			}
 		}
 
 		return r, nil
