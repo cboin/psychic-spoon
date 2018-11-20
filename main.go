@@ -69,7 +69,7 @@ func (s *sshConnectionPackets) isSshConnectionResponse(size int64) bool {
 	return false
 }
 
-func (s *sshConnectionPackets) isSshConnectipnRequest(size int64) bool {
+func (s *sshConnectionPackets) isSshConnectionRequest(size int64) bool {
 	if len(s.clientPackets) == 0 {
 		return true
 	}
@@ -125,8 +125,7 @@ func (sm *sessionMap) Put(key string, s *session) *session {
 }
 
 func getSession(host string, remoteAddr string) *session {
-	log.Println("getSession(host:", host, ",", remoteAddr, ")")
-	key := "Request|" + host + "|" + remoteAddr
+	key := host + "|" + remoteAddr
 
 	session := sessions.Get(key)
 	if session == nil {
@@ -143,8 +142,9 @@ func main() {
 	proxy := goproxy.NewProxyHttpServer()
 	proxy.Verbose = *verbose
 
+	// Search for SSH header
 	proxy.OnResponse().DoFunc(func(r *http.Response, ctx *goproxy.ProxyCtx) *http.Response {
-		sc := newStringChecker("SSH-_", r.Body)
+		sc := newStringChecker("SSH-", r.Body)
 		r.Body = sc
 
 		return r
@@ -187,6 +187,7 @@ func main() {
 		return r
 	})
 
+	// Check if used user agent is blacklisted
 	proxy.OnRequest().DoFunc(func(r *http.Request, ctx *goproxy.ProxyCtx) (*http.Request, *http.Response) {
 		userAgent := uA.New(r.Header.Get("User-Agent"))
 
@@ -234,7 +235,7 @@ func main() {
 		}
 		session := getSession(r.Host, ip)
 
-		if session.sshConnection.isSshConnectipnRequest(r.ContentLength) {
+		if session.sshConnection.isSshConnectionRequest(r.ContentLength) {
 			log.Println("Diffel-man exchange in requests")
 			session.sshConnectionRequests = true
 		}
@@ -319,6 +320,23 @@ func main() {
 		}
 
 		return r, nil
+	})
+
+	// Check if request was valide
+	proxy.OnResponse().DoFunc(func(r *http.Response, ctx *goproxy.ProxyCtx) *http.Response {
+		switch r.Request.Method {
+		case "GET":
+			rs, err := http.Get(r.Request.URL.String())
+			if err != nil {
+				log.Panic(err)
+			}
+
+			if rs.StatusCode != r.StatusCode {
+				log.Println("Status code from replay is different")
+			}
+		}
+
+		return r
 	})
 
 	log.Fatal(http.ListenAndServe(*addr, proxy))
