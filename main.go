@@ -5,9 +5,9 @@ import (
 	"flag"
 	"io"
 	"log"
+	"math"
 	"net"
 	"net/http"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -135,6 +135,19 @@ func getSession(host string, remoteAddr string) *session {
 	return session
 }
 
+func getEntropy(data string) (entropy float64) {
+	if data == "" {
+		return 0
+	}
+	for i := 0; i < 256; i++ {
+		px := float64(strings.Count(data, string(byte(i)))) / float64(len(data))
+		if px > 0 {
+			entropy += -px * math.Log2(px)
+		}
+	}
+	return entropy
+}
+
 func main() {
 	verbose := flag.Bool("v", true, "should every proxy request be logged to stdout")
 	addr := flag.String("addr", ":3128", "proxy listen address")
@@ -151,27 +164,16 @@ func main() {
 	})
 
 	proxy.OnResponse().DoFunc(func(r *http.Response, ctx *goproxy.ProxyCtx) *http.Response {
-		threshold := 16
-		contentLengthText := r.Header.Get("Content-Length")
 
-		if contentLengthText == "" {
-			log.Println("Content-Length: nil")
-			return r
-		}
-
-		contentLength, err := strconv.Atoi(contentLengthText)
-		if err != nil {
-			log.Panic(err)
-		}
-
-		if contentLength < threshold {
-			log.Println("Body under threshold")
+		// TODO: Read more than 16 bytes
+		if r.ContentLength < 16 {
 			return r
 		}
 
 		var b = make([]byte, 16)
 		rb := regretable.NewRegretableReaderCloser(r.Body)
-		rb.Read(b)
+		n, _ := rb.Read(b)
+		log.Println("Read:", n)
 		rb.Regret()
 		r.Body = rb
 
@@ -183,6 +185,8 @@ func main() {
 			ctx.Logf("Content-Type  mismatch -> (%s,%s)", detectedContentType,
 				headerContentType)
 		}
+
+		log.Println("Entropy:", getEntropy(string(b)))
 
 		return r
 	})
@@ -337,6 +341,15 @@ func main() {
 		}
 
 		return r
+	})
+
+	// Check request content length
+	proxy.OnRequest().DoFunc(func(r *http.Request, ctx *goproxy.ProxyCtx) (*http.Request, *http.Response) {
+		if r.Method == "POST" && r.ContentLength == 0 {
+			log.Println("POST request with content length equals to zero made.")
+		}
+
+		return r, nil
 	})
 
 	log.Fatal(http.ListenAndServe(*addr, proxy))
