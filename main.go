@@ -90,6 +90,7 @@ type session struct {
 	httpPosts              int64
 	httpConnects           int64
 	lsshConns              int64
+	httpRequests           int64
 }
 
 func newSession() *session {
@@ -347,6 +348,23 @@ func main() {
 	proxy.OnRequest().DoFunc(func(r *http.Request, ctx *goproxy.ProxyCtx) (*http.Request, *http.Response) {
 		if r.Method == "POST" && r.ContentLength == 0 {
 			log.Println("POST request with content length equals to zero made.")
+		}
+
+		return r, nil
+	})
+
+	// Check if the number of HTTP requests is lower than 20
+	proxy.OnRequest().DoFunc(func(r *http.Request, ctx *goproxy.ProxyCtx) (*http.Request, *http.Response) {
+		ip, _, err := net.SplitHostPort(r.RemoteAddr)
+		if err != nil {
+			log.Panic(err)
+		}
+		session := getSession(r.Host, ip)
+
+		session.httpRequests++
+
+		if session.httpRequests > 20 {
+			log.Println("Numbers of HTTP requests is above 20")
 		}
 
 		return r, nil
