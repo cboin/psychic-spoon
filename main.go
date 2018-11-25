@@ -353,6 +353,15 @@ func main() {
 		return r, nil
 	})
 
+	// Check if response is zero content length
+	proxy.OnResponse().DoFunc(func(r *http.Response, ctx *goproxy.ProxyCtx) *http.Response {
+		if r.ContentLength == 0 {
+			log.Println("Remote reponse with zero content length")
+		}
+
+		return r
+	})
+
 	// Check if the number of HTTP requests is lower than 20
 	proxy.OnRequest().DoFunc(func(r *http.Request, ctx *goproxy.ProxyCtx) (*http.Request, *http.Response) {
 		ip, _, err := net.SplitHostPort(r.RemoteAddr)
