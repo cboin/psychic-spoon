@@ -91,6 +91,7 @@ type session struct {
 	httpConnects           int64
 	lsshConns              int64
 	httpRequests           int64
+	pLengthRequest         int64
 }
 
 func newSession() *session {
@@ -362,6 +363,15 @@ func main() {
 		return r
 	})
 
+	// Check if response content length is under 500 bytes
+	proxy.OnResponse().DoFunc(func(r *http.Response, ctx *goproxy.ProxyCtx) *http.Response {
+		if r.ContentLength < 500 {
+			log.Println("Response content length is under 500 bytes")
+		}
+
+		return r
+	})
+
 	// Check if the number of HTTP requests is lower than 20
 	proxy.OnRequest().DoFunc(func(r *http.Request, ctx *goproxy.ProxyCtx) (*http.Request, *http.Response) {
 		ip, _, err := net.SplitHostPort(r.RemoteAddr)
@@ -377,6 +387,33 @@ func main() {
 		}
 
 		return r, nil
+	})
+
+	// Try to find echoed back keystroke
+	proxy.OnRequest().DoFunc(func(r *http.Request, ctx *goproxy.ProxyCtx) (*http.Request, *http.Response) {
+		ip, _, err := net.SplitHostPort(r.RemoteAddr)
+		if err != nil {
+			log.Panic(err)
+		}
+		session := getSession(r.Host, ip)
+
+		session.pLengthRequest = r.ContentLength
+
+		return r, nil
+	})
+
+	proxy.OnResponse().DoFunc(func(r *http.Response, ctx *goproxy.ProxyCtx) *http.Response {
+		ip, _, err := net.SplitHostPort(r.Request.RemoteAddr)
+		if err != nil {
+			log.Panic(err)
+		}
+		session := getSession(r.Request.Host, ip)
+
+		if session.pLengthRequest == r.ContentLength {
+			log.Println("Found echoed back keystroke")
+		}
+
+		return r
 	})
 
 	log.Fatal(http.ListenAndServe(*addr, proxy))
