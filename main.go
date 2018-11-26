@@ -205,6 +205,10 @@ func main() {
 		detectedContentType := strings.Split(http.DetectContentType(b), ";")[0]
 		headerContentType := r.Header.Get("Content-Type")
 
+		if detectedContentType == "text/plain; charset=utf-8" || detectedContentType == "application/octet-stream" {
+			return r
+		}
+
 		if detectedContentType != headerContentType {
 			ctx.Logf("Content type mismatch")
 			session.score += 1
