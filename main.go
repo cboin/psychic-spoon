@@ -175,7 +175,7 @@ func main() {
 		r.Body = sc
 
 		if sc.match {
-			log.Println("Pattern SSH found")
+			ctx.Logf("Pattern SSH found")
 			session.score += 30
 		}
 
@@ -196,8 +196,7 @@ func main() {
 
 		var b = make([]byte, 16)
 		rb := regretable.NewRegretableReaderCloser(r.Body)
-		n, _ := rb.Read(b)
-		log.Println("Read:", n)
+		rb.Read(b)
 		rb.Regret()
 		r.Body = rb
 
@@ -206,6 +205,7 @@ func main() {
 		headerContentType := r.Header.Get("Content-Type")
 
 		if detectedContentType != headerContentType {
+			ctx.Logf("Content type mismatch")
 			session.score += 5
 		}
 
@@ -227,6 +227,7 @@ func main() {
 		browser, _ := userAgent.Browser()
 
 		if browser == "" {
+			ctx.Logf("Empty user agent")
 			session.score += 10
 			return r, nil
 		}
@@ -237,6 +238,7 @@ func main() {
 
 		for _, ua := range userAgents {
 			if strings.Contains(ua, browser) {
+				ctx.Logf("User agent in black list")
 				session.score += 5
 				return r, nil
 			}
@@ -255,6 +257,7 @@ func main() {
 
 		if session.sshConnection.isSshConnectionResponse(r.ContentLength) {
 			session.sshConnectionResponses = true
+			ctx.Logf("SSH key exchanges found in response")
 			session.score += 25
 		}
 
@@ -270,6 +273,7 @@ func main() {
 
 		if session.sshConnection.isSshConnectionRequest(r.ContentLength) {
 			session.sshConnectionRequests = true
+			ctx.Logf("SSH key exchanges found in request")
 			session.score += 25
 		}
 
@@ -297,10 +301,12 @@ func main() {
 			session.httpPosts, "timestamp:", session.timestamp)
 
 		if session.httpPosts > (session.httpGets + 10) {
+			ctx.Logf("Too many HTTP post requests made")
 			session.score += 15
 		}
 
 		if session.httpConnects > 5 {
+			ctx.Logf("More than 5 HTTP connects made")
 			session.score += 10
 		}
 
@@ -327,6 +333,7 @@ func main() {
 		}
 
 		if (contentLength > 36 || contentLength > 76) && session.lsshConns >= 10 {
+			ctx.Logf("SSH channel keystrokes found")
 			session.score += 20
 		}
 
@@ -371,6 +378,7 @@ func main() {
 			}
 
 			if rs.StatusCode != r.StatusCode {
+				ctx.Logf("HTTP Request status code mismatch")
 				session.score += 5
 			}
 		}
@@ -387,10 +395,12 @@ func main() {
 		session := getSession(r.Request.Host, ip)
 
 		if r.Request.Method == "POST" && r.Request.ContentLength == 0 {
+			ctx.Logf("HTTP Post request with empty content length")
 			session.score += 5
 		}
 
 		if r.ContentLength == 0 {
+			ctx.Logf("Response with empty content length")
 			session.score += 5
 		}
 
@@ -408,6 +418,7 @@ func main() {
 		session.httpRequests++
 
 		if session.httpRequests > 200 {
+			ctx.Logf("HTTP Requests above 200")
 			session.score += 5
 		}
 
@@ -422,6 +433,7 @@ func main() {
 		session := getSession(r.Request.Host, ip)
 
 		if r.Request.ContentLength == r.ContentLength {
+			ctx.Logf("Echoed SSH keystrokes found")
 			session.score += 20
 		}
 
