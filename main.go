@@ -24,10 +24,14 @@ var (
 type stringChecker struct {
 	pattern string
 	reader  io.ReadCloser
+	match   bool
 }
 
 func newStringChecker(s string, r io.ReadCloser) *stringChecker {
-	return &stringChecker{s, r}
+	return &stringChecker{
+		pattern: s,
+		reader:  r,
+	}
 }
 
 func (s *stringChecker) Read(p []byte) (n int, err error) {
@@ -35,6 +39,7 @@ func (s *stringChecker) Read(p []byte) (n int, err error) {
 
 	if bytes.Contains(p[:n], []byte(s.pattern)) {
 		log.Println("Pattern -> (", s.pattern, ") found")
+		s.match = true
 	}
 
 	return
@@ -92,6 +97,7 @@ type session struct {
 	lsshConns              int64
 	httpRequests           int64
 	pLengthRequest         int64
+	score                  int64
 }
 
 func newSession() *session {
@@ -159,13 +165,29 @@ func main() {
 
 	// Search for SSH header
 	proxy.OnResponse().DoFunc(func(r *http.Response, ctx *goproxy.ProxyCtx) *http.Response {
+		ip, _, err := net.SplitHostPort(r.Request.RemoteAddr)
+		if err != nil {
+			log.Panic(err)
+		}
+		session := getSession(r.Request.Host, ip)
+
 		sc := newStringChecker("SSH-", r.Body)
 		r.Body = sc
+
+		if sc.match {
+			log.Println("Pattern SSH found")
+			session.score += 30
+		}
 
 		return r
 	})
 
 	proxy.OnResponse().DoFunc(func(r *http.Response, ctx *goproxy.ProxyCtx) *http.Response {
+		ip, _, err := net.SplitHostPort(r.Request.RemoteAddr)
+		if err != nil {
+			log.Panic(err)
+		}
+		session := getSession(r.Request.Host, ip)
 
 		// TODO: Read more than 16 bytes
 		if r.ContentLength < 16 {
@@ -184,23 +206,28 @@ func main() {
 		headerContentType := r.Header.Get("Content-Type")
 
 		if detectedContentType != headerContentType {
-			ctx.Logf("Content-Type  mismatch -> (%s,%s)", detectedContentType,
-				headerContentType)
+			session.score += 5
 		}
 
-		log.Println("Entropy:", getEntropy(string(b)))
+		//log.Println("Entropy:", getEntropy(string(b)))
 
 		return r
 	})
 
 	// Check if used user agent is blacklisted
 	proxy.OnRequest().DoFunc(func(r *http.Request, ctx *goproxy.ProxyCtx) (*http.Request, *http.Response) {
+		ip, _, err := net.SplitHostPort(r.RemoteAddr)
+		if err != nil {
+			log.Panic(err)
+		}
+		session := getSession(r.Host, ip)
+
 		userAgent := uA.New(r.Header.Get("User-Agent"))
 
 		browser, _ := userAgent.Browser()
 
 		if browser == "" {
-			log.Println("No browser found in user agent")
+			session.score += 10
 			return r, nil
 		}
 
@@ -210,7 +237,7 @@ func main() {
 
 		for _, ua := range userAgents {
 			if strings.Contains(ua, browser) {
-				log.Println("User agent in black list")
+				session.score += 5
 				return r, nil
 			}
 		}
@@ -227,8 +254,8 @@ func main() {
 		session := getSession(r.Request.Host, ip)
 
 		if session.sshConnection.isSshConnectionResponse(r.ContentLength) {
-			log.Println("Diffel-man exchange in responses")
 			session.sshConnectionResponses = true
+			session.score += 25
 		}
 
 		return r
@@ -242,8 +269,8 @@ func main() {
 		session := getSession(r.Host, ip)
 
 		if session.sshConnection.isSshConnectionRequest(r.ContentLength) {
-			log.Println("Diffel-man exchange in requests")
 			session.sshConnectionRequests = true
+			session.score += 25
 		}
 
 		return r, nil
@@ -270,11 +297,11 @@ func main() {
 			session.httpPosts, "timestamp:", session.timestamp)
 
 		if session.httpPosts > (session.httpGets + 10) {
-			log.Println("Suspiscious POST requests")
+			session.score += 15
 		}
 
-		if session.httpConnects > 0 {
-			log.Println("Suspiscious CONNECT requests")
+		if session.httpConnects > 5 {
+			session.score += 10
 		}
 
 		return r, nil
@@ -300,7 +327,7 @@ func main() {
 		}
 
 		if (contentLength > 36 || contentLength > 76) && session.lsshConns >= 10 {
-			log.Println("SSH TTY Keystrokes detected")
+			session.score += 20
 		}
 
 		return r
@@ -330,6 +357,12 @@ func main() {
 
 	// Check if request was valide
 	proxy.OnResponse().DoFunc(func(r *http.Response, ctx *goproxy.ProxyCtx) *http.Response {
+		ip, _, err := net.SplitHostPort(r.Request.RemoteAddr)
+		if err != nil {
+			log.Panic(err)
+		}
+		session := getSession(r.Request.Host, ip)
+
 		switch r.Request.Method {
 		case "GET":
 			rs, err := http.Get(r.Request.URL.String())
@@ -338,41 +371,33 @@ func main() {
 			}
 
 			if rs.StatusCode != r.StatusCode {
-				log.Println("Status code from replay is different")
+				session.score += 5
 			}
 		}
 
 		return r
 	})
 
-	// Check request content length
-	proxy.OnRequest().DoFunc(func(r *http.Request, ctx *goproxy.ProxyCtx) (*http.Request, *http.Response) {
-		if r.Method == "POST" && r.ContentLength == 0 {
-			log.Println("POST request with content length equals to zero made.")
-		}
-
-		return r, nil
-	})
-
 	// Check if response is zero content length
 	proxy.OnResponse().DoFunc(func(r *http.Response, ctx *goproxy.ProxyCtx) *http.Response {
+		ip, _, err := net.SplitHostPort(r.Request.RemoteAddr)
+		if err != nil {
+			log.Panic(err)
+		}
+		session := getSession(r.Request.Host, ip)
+
+		if r.Request.Method == "POST" && r.Request.ContentLength == 0 {
+			session.score += 5
+		}
+
 		if r.ContentLength == 0 {
-			log.Println("Remote reponse with zero content length")
+			session.score += 5
 		}
 
 		return r
 	})
 
-	// Check if response content length is under 500 bytes
-	proxy.OnResponse().DoFunc(func(r *http.Response, ctx *goproxy.ProxyCtx) *http.Response {
-		if r.ContentLength < 500 {
-			log.Println("Response content length is under 500 bytes")
-		}
-
-		return r
-	})
-
-	// Check if the number of HTTP requests is lower than 20
+	// Check if the number of HTTP requests is lower than 200
 	proxy.OnRequest().DoFunc(func(r *http.Request, ctx *goproxy.ProxyCtx) (*http.Request, *http.Response) {
 		ip, _, err := net.SplitHostPort(r.RemoteAddr)
 		if err != nil {
@@ -382,22 +407,9 @@ func main() {
 
 		session.httpRequests++
 
-		if session.httpRequests > 20 {
-			log.Println("Numbers of HTTP requests is above 20")
+		if session.httpRequests > 200 {
+			session.score += 5
 		}
-
-		return r, nil
-	})
-
-	// Try to find echoed back keystroke
-	proxy.OnRequest().DoFunc(func(r *http.Request, ctx *goproxy.ProxyCtx) (*http.Request, *http.Response) {
-		ip, _, err := net.SplitHostPort(r.RemoteAddr)
-		if err != nil {
-			log.Panic(err)
-		}
-		session := getSession(r.Host, ip)
-
-		session.pLengthRequest = r.ContentLength
 
 		return r, nil
 	})
@@ -409,11 +421,18 @@ func main() {
 		}
 		session := getSession(r.Request.Host, ip)
 
-		if session.pLengthRequest == r.ContentLength {
-			log.Println("Found echoed back keystroke")
+		if r.Request.ContentLength == r.ContentLength {
+			session.score += 20
 		}
 
 		return r
+	})
+
+	proxy.OnRequest().DoFunc(func(r *http.Request, ctx *goproxy.ProxyCtx) (*http.Request, *http.Response) {
+		ctx.Logf("SSH tunnel detected")
+		return r, goproxy.NewResponse(r,
+			goproxy.ContentTypeText, http.StatusForbidden,
+			"SSH tunnel detected")
 	})
 
 	log.Fatal(http.ListenAndServe(*addr, proxy))
