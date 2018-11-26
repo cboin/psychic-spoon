@@ -176,7 +176,7 @@ func main() {
 
 		if sc.match && !session.hasPattern {
 			ctx.Logf("Pattern SSH found")
-			ssession.hasPattern = true
+			session.hasPattern = true
 			session.score += 30
 		}
 
