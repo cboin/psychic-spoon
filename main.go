@@ -38,7 +38,6 @@ func (s *stringChecker) Read(p []byte) (n int, err error) {
 	n, err = s.reader.Read(p)
 
 	if bytes.Contains(p[:n], []byte(s.pattern)) {
-		log.Println("Pattern -> (", s.pattern, ") found")
 		s.match = true
 	}
 
@@ -96,7 +95,8 @@ type session struct {
 	httpConnects           int64
 	lsshConns              int64
 	httpRequests           int64
-	pLengthRequest         int64
+	hasPattern             bool
+	hasUserAgent           bool
 	score                  int64
 }
 
@@ -174,8 +174,9 @@ func main() {
 		sc := newStringChecker("SSH-", r.Body)
 		r.Body = sc
 
-		if sc.match {
+		if sc.match && !session.hasPattern {
 			ctx.Logf("Pattern SSH found")
+			ssession.hasPattern = true
 			session.score += 30
 		}
 
@@ -226,22 +227,28 @@ func main() {
 
 		browser, _ := userAgent.Browser()
 
-		if browser == "" {
-			ctx.Logf("Empty user agent")
-			session.score += 10
-			return r, nil
-		}
+		if !session.hasUserAgent {
 
-		userAgents := []string{
-			"Go-http-client/1.1",
-		}
-
-		for _, ua := range userAgents {
-			if strings.Contains(ua, browser) {
-				ctx.Logf("User agent in black list")
-				session.score += 5
+			if browser == "" {
+				ctx.Logf("Empty user agent")
+				session.score += 10
 				return r, nil
 			}
+
+			userAgents := []string{
+				"Go-http-client/1.1",
+			}
+
+			for _, ua := range userAgents {
+				if strings.Contains(ua, browser) {
+					ctx.Logf("User agent in black list")
+					session.score += 5
+					return r, nil
+				}
+			}
+
+			session.hasUserAgent = true
+
 		}
 
 		return r, nil
