@@ -430,11 +430,11 @@ func main() {
 
 	proxy.OnRequest().DoFunc(func(r *http.Request, ctx *goproxy.ProxyCtx) (*http.Request, *http.Response) {
 
-		ip, _, err := net.SplitHostPort(r.Request.RemoteAddr)
+		ip, _, err := net.SplitHostPort(r.RemoteAddr)
 		if err != nil {
 			log.Panic(err)
 		}
-		session := getSession(r.Request.Host, ip)
+		session := getSession(r.Host, ip)
 
 		if session.score >= 100 {
 			ctx.Logf("SSH tunnel detected")
