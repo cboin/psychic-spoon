@@ -207,7 +207,7 @@ func main() {
 
 		if detectedContentType != headerContentType {
 			ctx.Logf("Content type mismatch")
-			session.score += 5
+			session.score += 1
 		}
 
 		//log.Println("Entropy:", getEntropy(string(b)))
@@ -232,6 +232,7 @@ func main() {
 			if browser == "" {
 				ctx.Logf("Empty user agent")
 				session.score += 10
+				session.hasUserAgent = true
 				return r, nil
 			}
 
@@ -243,11 +244,10 @@ func main() {
 				if strings.Contains(ua, browser) {
 					ctx.Logf("User agent in black list")
 					session.score += 5
+					session.hasUserAgent = true
 					return r, nil
 				}
 			}
-
-			session.hasUserAgent = true
 
 		}
 
@@ -383,6 +383,7 @@ func main() {
 			if err != nil {
 				log.Panic(err)
 			}
+			defer rs.Body.Close()
 
 			if rs.StatusCode != r.StatusCode {
 				ctx.Logf("HTTP Request status code mismatch")
