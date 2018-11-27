@@ -266,29 +266,23 @@ func main() {
 		}
 		session := getSession(r.Request.Host, ip)
 
+		if r.ContentLength == 0 {
+			ctx.Logf("Content length equals to zero")
+		}
+
 		if session.sshConnection.isSshConnectionResponse(r.ContentLength) {
 			session.sshConnectionResponses = true
 			ctx.Logf("SSH key exchanges found in response")
 			session.score += 25
 		}
 
-		return r
-	})
-
-	proxy.OnRequest().DoFunc(func(r *http.Request, ctx *goproxy.ProxyCtx) (*http.Request, *http.Response) {
-		ip, _, err := net.SplitHostPort(r.RemoteAddr)
-		if err != nil {
-			log.Panic(err)
-		}
-		session := getSession(r.Host, ip)
-
-		if session.sshConnection.isSshConnectionRequest(r.ContentLength) {
+		if session.sshConnection.isSshConnectionRequest(r.Request.ContentLength) {
 			session.sshConnectionRequests = true
 			ctx.Logf("SSH key exchanges found in request")
 			session.score += 25
 		}
 
-		return r, nil
+		return r
 	})
 
 	// Count number of GET and POST
@@ -443,6 +437,10 @@ func main() {
 			log.Panic(err)
 		}
 		session := getSession(r.Request.Host, ip)
+
+		if r.ContentLength == 0 {
+			return r
+		}
 
 		if r.Request.ContentLength == r.ContentLength {
 			ctx.Logf("Echoed SSH keystrokes found")
