@@ -39,7 +39,10 @@ func (s *stringChecker) Read(p []byte) (n int, err error) {
 	n, err = s.reader.Read(p)
 
 	if bytes.Contains(p[:n], []byte(s.pattern)) {
-		s.session.score += 50
+		if !s.session.hasPattern {
+			s.session.score += 50
+			s.session.hasPattern = true
+		}
 	}
 
 	return
