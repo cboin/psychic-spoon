@@ -24,13 +24,14 @@ var (
 type stringChecker struct {
 	pattern string
 	reader  io.ReadCloser
-	match   bool
+	session *session
 }
 
-func newStringChecker(s string, r io.ReadCloser) *stringChecker {
+func newStringChecker(s string, r io.ReadCloser, ss *session) *stringChecker {
 	return &stringChecker{
 		pattern: s,
 		reader:  r,
+		session: ss,
 	}
 }
 
@@ -38,7 +39,7 @@ func (s *stringChecker) Read(p []byte) (n int, err error) {
 	n, err = s.reader.Read(p)
 
 	if bytes.Contains(p[:n], []byte(s.pattern)) {
-		s.match = true
+		s.session.score += 50
 	}
 
 	return
@@ -171,14 +172,8 @@ func main() {
 		}
 		session := getSession(r.Request.Host, ip)
 
-		sc := newStringChecker("SSH-", r.Body)
+		sc := newStringChecker("SSH-", r.Body, session)
 		r.Body = sc
-
-		if sc.match && !session.hasPattern {
-			ctx.Logf("Pattern SSH found")
-			session.hasPattern = true
-			session.score += 30
-		}
 
 		return r
 	})
@@ -204,10 +199,6 @@ func main() {
 		// if the Content-Type contains ";" drop the right part
 		detectedContentType := strings.Split(http.DetectContentType(b), ";")[0]
 		headerContentType := r.Header.Get("Content-Type")
-
-		if detectedContentType == "text/plain; charset=utf-8" || detectedContentType == "application/octet-stream" {
-			return r
-		}
 
 		if detectedContentType != headerContentType {
 			ctx.Logf("Content type mismatch")
