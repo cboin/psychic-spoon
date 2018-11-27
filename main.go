@@ -188,20 +188,30 @@ func main() {
 		}
 		session := getSession(r.Request.Host, ip)
 
-		// TODO: Read more than 16 bytes
-		if r.ContentLength < 16 {
+		var willRead int64 = 500 
+
+		if r.ContentLength == -1 {
 			return r
 		}
 
-		var b = make([]byte, 16)
+		if r.ContentLength < willRead {
+			willRead = r.ContentLength
+		}
+
+		log.Println("Will read:", willRead)	
+
+		var b = make([]byte, willRead)
 		rb := regretable.NewRegretableReaderCloser(r.Body)
-		rb.Read(b)
+		n, err := rb.Read(b)
 		rb.Regret()
 		r.Body = rb
 
 		// if the Content-Type contains ";" drop the right part
-		detectedContentType := strings.Split(http.DetectContentType(b), ";")[0]
-		headerContentType := r.Header.Get("Content-Type")
+		detectedContentType := strings.Split(http.DetectContentType(b[:n]), ";")[0]
+		headerContentType := strings.Split(r.Header.Get("Content-Type"), ";")[0]
+
+
+		log.Println("Detected CT:", detectedContentType, "Header CT:", headerContentType)
 
 		if detectedContentType != headerContentType {
 			ctx.Logf("Content type mismatch")
