@@ -417,7 +417,7 @@ func main() {
 		return r
 	})
 
-	// Check if the number of HTTP requests is lower than 200
+	// Check if the number of HTTP requests is lower than 300
 	proxy.OnRequest().DoFunc(func(r *http.Request, ctx *goproxy.ProxyCtx) (*http.Request, *http.Response) {
 		ip, _, err := net.SplitHostPort(r.RemoteAddr)
 		if err != nil {
@@ -427,8 +427,8 @@ func main() {
 
 		session.httpRequests++
 
-		if session.httpRequests > 200 {
-			ctx.Logf("HTTP Requests above 200")
+		if session.httpRequests > 300 {
+			ctx.Logf("HTTP Requests above 300")
 			session.score += 5
 		}
 
@@ -472,6 +472,21 @@ func main() {
 		return r, nil
 	})
 
+	go startAutoDecrement()
+
 	log.Fatal(http.ListenAndServe(*addr, proxy))
 
+}
+
+
+func startAutoDecrement() {
+	for {
+		sessions.RLock()
+		for _, v := range sessions.sessions {
+			v.score -= 20
+		}
+		sessions.RUnlock()
+		log.Println("Clean up finish")
+		time.Sleep(time.Second * 30)
+	}
 }
