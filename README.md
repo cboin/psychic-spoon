@@ -8,8 +8,8 @@ This proxy is used as a proof of concept to detect SSH tunneling over HTTP.
 * Find if the given content type match a detected content type
 * Blacklisting user agents
 * Check if response content length is zero
-* Looking for SSH handcheck
-	- SSH handcheck can be detected by looking at size of packets
+* Looking for SSH handshake
+	- SSH handshake can be detected by looking at size of packets
 * Count number of HTTP get and HTTP post
 * Replay HTTP get requests
 * Check if total number of HTTP requests is lower than 300
