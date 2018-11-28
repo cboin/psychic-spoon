@@ -15,6 +15,8 @@ This proxy is used as a proof of concept to detect SSH tunneling over HTTP.
 * Check if total number of HTTP requests is lower than 300
 * Search for echoed HTTP packets
 	- Each keystrokes sends over SSH are echoed back to the client by the server.
+	
+A cleaner is used to reduce to score
 
 ### Note yet implemented
 * Compute playload entropy
